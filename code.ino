@@ -1,8 +1,18 @@
 // Include the necessary libraries
 #include <Arduino.h>
+// Include the necessary library for controlling the WS2812 LED strip
+#include "Freenove_WS2812_Lib_for_ESP32.h"
 
-// Define the GPIO pin number for the push button
+// Define constants for the LED strip configuration
+#define CHANNEL 0            // The channel number for the RMT peripheral
+#define NUM_OF_LEDS 1        // The number of LEDs in the strip
+
+// Define the GPIO pin numbers for the push button and the LED
 #define ESP32_C3_PUSH_BTN_GPIO 9
+#define ESP32_C3_LED_GPIO 8
+
+// Create an instance of the Freenove_ESP32_WS2812 class to control the LED strip
+Freenove_ESP32_WS2812 strip = Freenove_ESP32_WS2812(NUM_OF_LEDS, ESP32_C3_LED_GPIO, CHANNEL);
 
 // The setup function runs once when the Arduino board is powered on or reset
 void setup()
@@ -12,18 +22,23 @@ void setup()
 
     // Configure the push button pin as an input
     pinMode(ESP32_C3_PUSH_BTN_GPIO, INPUT);
+
+    // Initialize the LED strip
+    strip.begin();
+
+    // Turn off the first LED in the strip
+    strip.setLedColor(0, 0, 0, 0);
 }
+
+// Declare a variable to store the toggle state of the LED
+bool toggle_state = false;
 
 // The loop function runs continuously after the setup function has finished executing
 void loop()
 {
     // Check if the push button is pressed (the pin reads LOW when pressed)
     if (digitalRead(ESP32_C3_PUSH_BTN_GPIO) == LOW) {
-        // Key debounce handling: Debouncing is used to eliminate the effect of
-        // mechanical noise or switch bounce that can cause a single button press
-        // to be detected as multiple presses. By waiting for a short period (100 ms)
-        // after detecting a button press, we can ensure that any bounce has settled
-        // and the button press is registered only once.
+        // Key debounce handling
         delay(100);
 
         // Record the start time of the button press
@@ -39,6 +54,18 @@ void loop()
 
         // Calculate and print the duration of the button press in seconds
         Serial.printf("Button pressed for %d seconds\n", (endTime - startTime) / 1000);
+
+        // Toggle the LED state
+        toggle_state = !toggle_state;
+
+        // If the toggle state is true, turn on the LED with red color
+        if (toggle_state == true) {
+          strip.setLedColor(0, 255, 0, 0);
+        }
+        // If the toggle state is false, turn off the LED
+        else {
+          strip.setLedColor(0, 0, 0, 0);
+        }
     }
 
     // Wait for a short period (100 ms) before checking the button state again
