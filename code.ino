@@ -1,71 +1,113 @@
-// Include the necessary libraries
-#include <Arduino.h>
-// Include the necessary library for controlling the WS2812 LED strip
-#include "Freenove_WS2812_Lib_for_ESP32.h"
+// Include the necessary libraries for the ESP RainMaker, Wi-Fi and Wi-Fi Provisioning
+#include "RMaker.h"
+#include "WiFi.h"
+#include "WiFiProv.h"
 
-// Define constants for the LED strip configuration
-#define CHANNEL 0            // The channel number for the RMT peripheral
-#define NUM_OF_LEDS 1        // The number of LEDs in the strip
-
-// Define the GPIO pin numbers for the push button and the LED
+// Define the GPIO pin number for the push button
 #define ESP32_C3_PUSH_BTN_GPIO 9
-#define ESP32_C3_LED_GPIO 8
 
-// Create an instance of the Freenove_ESP32_WS2812 class to control the LED strip
-Freenove_ESP32_WS2812 strip = Freenove_ESP32_WS2812(NUM_OF_LEDS, ESP32_C3_LED_GPIO, CHANNEL);
+// Define provisioning service name and proof of possession (pop) code
+const char *service_name = "PROV_3448"; // Replace with a random 4-digit code
+const char *pop = "abcd1234";
+
+// Declare a variable to store the power state
+bool power_state = true;
+
+// The framework provides some standard device types like switch, lightbulb, fan, temperature sensor.
+// But, you can also define custom devices using the 'Device' base class object, as shown here
+static Device my_device;
+
+// Event handler for system provisioning events
+void sysProvEvent(arduino_event_t *sys_event)
+{
+    switch (sys_event->event_id) {
+        case ARDUINO_EVENT_PROV_START:
+            Serial.printf("\nProvisioning Started with name \"%s\" and PoP \"%s\" on BLE\n", service_name, pop);
+            printQR(service_name, pop, "ble");
+            break;
+        default:;
+    }
+}
+
+// Callback function for handling changes in parameter values
+void write_callback(Device *device, Param *param, const param_val_t val, void *priv_data, write_ctx_t *ctx)
+{
+    const char *device_name = device->getDeviceName();
+    const char *param_name = param->getParamName();
+
+    if(strcmp(param_name, "Power") == 0) {
+        Serial.printf("Received value = %s for %s - %s\n", val.val.b? "true" : "false", device_name, param_name);
+        power_state = val.val.b;
+        param->updateAndReport(val);
+    }
+}
 
 // The setup function runs once when the Arduino board is powered on or reset
 void setup()
 {
     // Initialize the serial communication with a baud rate of 115200
     Serial.begin(115200);
-
-    // Configure the push button pin as an input
     pinMode(ESP32_C3_PUSH_BTN_GPIO, INPUT);
 
-    // Initialize the LED strip
-    strip.begin();
+    // Create and initialize the RainMaker node
+    Node my_node;
+    my_node = RMaker.initNode("ESP RainMaker Node");
 
-    // Turn off the first LED in the strip
-    strip.setLedColor(0, 0, 0, 0);
+    // Create a custom switch device
+    my_device = Device("Switch", "esp.device.lightbulb", &power_state);
+
+    // Add a name parameter for the custom device
+    my_device.addNameParam();
+
+    // Create and add a custom power parameter
+    Param power_param("Power", "esp.param.power", value(power_state), PROP_FLAG_READ | PROP_FLAG_WRITE);
+
+    // Add UI Widget Type in Phone app
+    power_param.addUIType(ESP_RMAKER_UI_TOGGLE);
+
+    // Add parameter to the device
+    my_device.addParam(power_param);
+
+    // Assign the primary parameter for the device
+    my_device.assignPrimaryParam(my_device.getParamByName("Power"));
+
+    // Set the write callback function for the device
+    my_device.addCb(write_callback);
+
+    // Add the custom device to the node
+    my_node.addDevice(my_device);
+
+    // Start the RainMaker service
+    RMaker.start();
+
+    // Register the system provisioning event handler
+    WiFi.onEvent(sysProvEvent);
+
+    // Begin Wi-Fi provisioning using BLE
+    WiFiProv.beginProvision(WIFI_PROV_SCHEME_BLE, WIFI_PROV_SCHEME_HANDLER_FREE_BTDM, WIFI_PROV_SECURITY_1, pop, service_name);
 }
-
-// Declare a variable to store the toggle state of the LED
-bool toggle_state = false;
 
 // The loop function runs continuously after the setup function has finished executing
 void loop()
 {
     // Check if the push button is pressed (the pin reads LOW when pressed)
     if (digitalRead(ESP32_C3_PUSH_BTN_GPIO) == LOW) {
-        // Key debounce handling
+        // Key debounce handling: wait for 100 ms to avoid false triggering due to button bouncing
         delay(100);
 
-        // Record the start time of the button press
-        int startTime = millis();
-
-        // Wait for the button to be released (the pin reads HIGH when released)
+        // Wait until the button is released (the pin reads HIGH when released)
         while (digitalRead(ESP32_C3_PUSH_BTN_GPIO) == LOW) {
             delay(50);
         }
 
-        // Record the end time of the button press
-        int endTime = millis();
+        // Toggle the power state variable (switch between true and false)
+        power_state = !power_state;
 
-        // Calculate and print the duration of the button press in seconds
-        Serial.printf("Button pressed for %d seconds\n", (endTime - startTime) / 1000);
+        // Print the new power state to the serial monitor
+        Serial.printf("Toggle State to %s.\n", power_state ? "true" : "false");
 
-        // Toggle the LED state
-        toggle_state = !toggle_state;
-
-        // If the toggle state is true, turn on the LED with red color
-        if (toggle_state == true) {
-          strip.setLedColor(0, 255, 0, 0);
-        }
-        // If the toggle state is false, turn off the LED
-        else {
-          strip.setLedColor(0, 0, 0, 0);
-        }
+        // Update and report the new power state to the RainMaker server
+        my_device.updateAndReportParam("Power", power_state);
     }
 
     // Wait for a short period (100 ms) before checking the button state again
